@@ -1,6 +1,6 @@
 # PaperPilot Agent
 
-A polished, portfolio-ready **paper revision multi-agent** application for researchers.
+portfolio **paper revision multi-agent** application for researchers.
 
 ## What it does
 
