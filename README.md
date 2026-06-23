@@ -12,7 +12,7 @@
 - Require human approval before export
 - Show a trace timeline for the multi-agent workflow
 
-The application runs in **demo mode by default**. It provides a fully working interface and API without an LLM key. Optional OpenAI integration is isolated in the backend, so you can connect it later without changing the UI.
+
 
 ## Tech stack
 
