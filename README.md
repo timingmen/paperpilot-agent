@@ -57,8 +57,6 @@ OPENAI_MODEL=gpt-5-mini
 CORS_ORIGINS=http://localhost:5173
 ```
 
-Keep `APP_MODE=demo` for the included demo behaviour. When you later enable a model provider, replace the `llm_stub()` function in `backend/app/agent_service.py` with the official agent SDK call while preserving the Pydantic response schemas.
-
 ## Product flow
 
 1. Create a project and upload source files.
