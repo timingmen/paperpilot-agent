@@ -123,3 +123,4 @@ def export_response_letter(project_id: str):
     stream.seek(0)
     headers = {"Content-Disposition": 'attachment; filename="paperpilot_response_to_reviewers.docx"'}
     return StreamingResponse(stream, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document", headers=headers)
+ 
