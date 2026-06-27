@@ -40,7 +40,7 @@ class ReviewTask(BaseModel):
     suggested_change: str
     response_draft: str
     evidence: list[Evidence] = []
- 
+
 class TraceEvent(BaseModel):
     agent: str
     action: str

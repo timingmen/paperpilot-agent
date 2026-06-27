@@ -62,7 +62,7 @@ TASKS = [
         evidence=[
             Evidence(source="Figure archive", location="Failure case panel", excerpt="False retrievals predominantly arise in repeated road blocks and imagery containing large seasonal or construction changes.", score=0.90),
         ],
-    ),   
+    ),
     ReviewTask(
         id="R1-C4",
         reviewer="Reviewer 1",

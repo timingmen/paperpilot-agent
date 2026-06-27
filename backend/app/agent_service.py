@@ -1,9 +1,27 @@
 from __future__ import annotations
+import os
 import re
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Protocol
 from .demo_data import PROJECT, TASKS, TRACE
 from .models import AnalysisResponse, Evidence, Project, ReviewTask, TraceEvent
+
+
+class AgentProvider(Protocol):
+    def analyze(self, project: Project, reviewer_text: str, manuscript_text: str) -> AnalysisResponse:
+        ...
+
+
+class RuleBasedAgentProvider:
+    def analyze(self, project: Project, reviewer_text: str, manuscript_text: str) -> AnalysisResponse:
+        return run_demo_analysis(project, reviewer_text, manuscript_text)
+
+
+def get_agent_provider(mode: str | None = None) -> AgentProvider:
+    selected = (mode or os.getenv("APP_MODE", "demo")).strip().lower()
+    if selected in {"demo", "rule", "rules", "rule-based", "local"}:
+        return RuleBasedAgentProvider()
+    raise ValueError(f"Unsupported agent provider mode: {selected}")
 
 KEYWORDS = {
     "training": ("Reproducibility", "Section 4.5.7 · Computational footprint"),
