@@ -2,9 +2,13 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Iterable, Protocol
+from collections.abc import Callable
+from typing import Protocol
+
+from .deepseek_service import DeepSeekDraftService, OpenAIDeepSeekClient
 from .demo_data import PROJECT, TASKS, TRACE
 from .models import AnalysisResponse, Evidence, Project, ReviewTask, TraceEvent
+from .rag_service import FastEmbedProvider, VectorRetriever
 
 
 class AgentProvider(Protocol):
@@ -12,15 +16,112 @@ class AgentProvider(Protocol):
         ...
 
 
+class AnalysisInputError(ValueError):
+    pass
+
+
 class RuleBasedAgentProvider:
     def analyze(self, project: Project, reviewer_text: str, manuscript_text: str) -> AnalysisResponse:
         return run_demo_analysis(project, reviewer_text, manuscript_text)
+
+
+class DeepSeekRagAgentProvider:
+    def __init__(
+        self,
+        *,
+        retriever_factory: Callable[[str], VectorRetriever],
+        draft_service: DeepSeekDraftService,
+        top_k: int = 3,
+    ) -> None:
+        self.retriever_factory = retriever_factory
+        self.draft_service = draft_service
+        self.top_k = top_k
+
+    def analyze(self, project: Project, reviewer_text: str, manuscript_text: str) -> AnalysisResponse:
+        if not manuscript_text.strip():
+            raise AnalysisInputError("A manuscript must be uploaded before running vector RAG analysis")
+        if not reviewer_text.strip():
+            raise AnalysisInputError("Reviewer comments must be uploaded before running vector RAG analysis")
+
+        comments = split_comments(reviewer_text)
+        if not comments:
+            raise AnalysisInputError("No actionable reviewer comments were found")
+
+        retriever = self.retriever_factory(manuscript_text)
+        tasks: list[ReviewTask] = []
+        for index, comment in enumerate(comments, start=1):
+            retrieved = retriever.search(comment, top_k=self.top_k)
+            generated = self.draft_service.generate(comment, retrieved)
+            tasks.append(
+                ReviewTask(
+                    id=f"RAG-C{index}",
+                    reviewer="Reviewer comment",
+                    title=generated.title,
+                    comment=comment,
+                    category=generated.category,
+                    priority=generated.priority,
+                    status="Needs review",
+                    manuscript_section=generated.manuscript_section,
+                    rationale=generated.rationale,
+                    suggested_change=generated.suggested_change,
+                    response_draft=generated.response_draft,
+                    evidence=[
+                        Evidence(
+                            source="Manuscript vector index",
+                            location=item.location,
+                            excerpt=item.text,
+                            score=item.score,
+                        )
+                        for item in retrieved
+                    ],
+                )
+            )
+
+        trace = [
+            TraceEvent(agent="Review Parser", action=f"Extracted {len(comments)} actionable comments", status="done", elapsed="local", detail="Split reviewer text into bounded revision requests."),
+            TraceEvent(agent="Vector Index", action="Embedded manuscript chunks with BGE", status="done", elapsed="local", detail="Built a local dense-vector index for the uploaded manuscript."),
+            TraceEvent(agent="Evidence Retriever", action=f"Retrieved top-{self.top_k} evidence chunks", status="done", elapsed="local", detail="Ranked normalized embedding similarity for every reviewer comment."),
+            TraceEvent(agent="DeepSeek Revision Writer", action=f"Generated {len(tasks)} grounded task drafts", status="done", elapsed="API", detail="Used retrieved evidence and validated every response against the task schema."),
+            TraceEvent(agent="Quality Gate", action="Human approval required", status="waiting", elapsed="-", detail="Generated text remains blocked from export until explicitly approved."),
+        ]
+        return AnalysisResponse(project=project, tasks=tasks, trace=trace)
+
+
+def build_deepseek_rag_provider() -> DeepSeekRagAgentProvider:
+    api_key = os.getenv("DEEPSEEK_API_KEY", "")
+    model = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    embedding_model = os.getenv("EMBEDDING_MODEL", "BAAI/bge-small-en-v1.5")
+    cache_dir = Path(os.getenv("EMBEDDING_CACHE_DIR", str(Path.home() / ".cache" / "paperpilot" / "fastembed")))
+    chunk_chars = int(os.getenv("RAG_CHUNK_CHARS", "900"))
+    chunk_overlap = int(os.getenv("RAG_CHUNK_OVERLAP", "150"))
+    top_k = int(os.getenv("RAG_TOP_K", "3"))
+
+    embedder = FastEmbedProvider(embedding_model, cache_dir)
+    client = OpenAIDeepSeekClient(api_key=api_key, model=model, base_url=base_url)
+    draft_service = DeepSeekDraftService(client)
+
+    def create_retriever(manuscript_text: str) -> VectorRetriever:
+        return VectorRetriever.from_text(
+            manuscript_text,
+            embedder,
+            chunk_chars=chunk_chars,
+            overlap_chars=chunk_overlap,
+        )
+
+    return DeepSeekRagAgentProvider(
+        retriever_factory=create_retriever,
+        draft_service=draft_service,
+        top_k=top_k,
+    )
 
 
 def get_agent_provider(mode: str | None = None) -> AgentProvider:
     selected = (mode or os.getenv("APP_MODE", "demo")).strip().lower()
     if selected in {"demo", "rule", "rules", "rule-based", "local"}:
         return RuleBasedAgentProvider()
+    if selected in {"deepseek-rag", "deepseek", "rag"}:
+        return build_deepseek_rag_provider()
     raise ValueError(f"Unsupported agent provider mode: {selected}")
 
 KEYWORDS = {

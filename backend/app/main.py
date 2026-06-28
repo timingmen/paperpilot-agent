@@ -10,12 +10,18 @@ from docx import Document
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from dotenv import load_dotenv
 from pypdf import PdfReader
 
-from .agent_service import get_agent_provider
+from .agent_service import AnalysisInputError, get_agent_provider
+from .deepseek_service import DeepSeekConfigurationError, DeepSeekResponseError, DeepSeekTransportError
 from .exporter import build_response_letter_docx
 from .models import AnalysisResponse, Project, ProjectCreate, ReviewTask, TaskUpdate, UploadSummary
+from .rag_service import EmbeddingServiceError
 from .store import JsonProjectStore
+
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+load_dotenv(BACKEND_DIR / ".env")
 
 app = FastAPI(title="PaperPilot Agent API", version="0.2.0")
 
@@ -28,7 +34,7 @@ app.add_middleware(
     allow_credentials=True,
 )
 
-DEFAULT_DATA_FILE = Path(__file__).resolve().parents[1] / "data" / "paperpilot_state.json"
+DEFAULT_DATA_FILE = BACKEND_DIR / "data" / "paperpilot_state.json"
 DATA_FILE = Path(os.getenv("PAPERPILOT_DATA_FILE", str(DEFAULT_DATA_FILE)))
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", str(8 * 1024 * 1024)))
 UPLOAD_KINDS = {"manuscript", "reviewer", "journal", "bibliography"}
@@ -123,14 +129,23 @@ def analyze(project_id: str):
 
     try:
         provider = get_agent_provider()
+    except DeepSeekConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
-    result = provider.analyze(
-        project,
-        source_texts.get("reviewer", ""),
-        source_texts.get("manuscript", ""),
-    )
+    try:
+        result = provider.analyze(
+            project,
+            source_texts.get("reviewer", ""),
+            source_texts.get("manuscript", ""),
+        )
+    except AnalysisInputError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (DeepSeekResponseError, DeepSeekTransportError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except EmbeddingServiceError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     updated_project = result.project.model_copy(
         update={
             "comments": len(result.tasks),

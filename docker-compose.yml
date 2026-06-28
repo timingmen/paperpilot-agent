@@ -6,6 +6,10 @@ services:
     environment:
       APP_MODE: demo
       CORS_ORIGINS: http://localhost:5173
+      PAPERPILOT_DATA_FILE: /app/data/paperpilot_state.json
+      MAX_UPLOAD_BYTES: 8388608
+    volumes:
+      - paperpilot-data:/app/data
   frontend:
     build: ./frontend
     ports:
@@ -14,3 +18,6 @@ services:
       VITE_API_URL: http://localhost:8000/api
     depends_on:
       - backend
+
+volumes:
+  paperpilot-data:
